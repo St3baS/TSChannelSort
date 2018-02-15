@@ -1,151 +1,137 @@
-<?php 
+<?php
+
+/**
+ * Created by St3baS
+ */
 
 require_once(realpath(dirname(__FILE__) . '/ts3phpframework/libraries/TeamSpeak3/TeamSpeak3.php'));
 
-function connection() {
-    
-    global $ts3_VirtualServer;
-    global $config;
-	$ts3_VirtualServer = TeamSpeak3::factory("serverquery://{$config['serveradmin']}:{$config['password']}@{$config['address']}:{$config['queryport']}/?server_port={$config['port']}&nickname={$config['nickname']}");
-}
+require 'configs/config.php';
 
-+$config = array(
-+    "address" => "", 
-+    "queryport" => "", 
-+    "serveradmin" => "", 
-+    "password" => "", 
-+    "port" => "9987", 
-+    "nickname" => "ChannelSortBot"
-+);
+try
+{
+    // Create connection to TS3 server
+    $server_uri        = "serverquery://{$config['serveradmin']}:{$config['password']}@{$config['address']}:{$config['queryport']}" .
+                         "/?server_port={$config['port']}&nickname={$config['nickname']}&blocking=0";
+    $ts3_VirtualServer = TeamSpeak3::factory($server_uri);
 
-$dont_touch = array(1, 3, 4, 5, 6, 7, 8, 9, 11, 61, 63, 64, 65, 66, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 8);
+    // get notified on incoming private messages
+    $ts3_VirtualServer->notifyRegister("textprivate");
 
-//AlphabetChannels order
-$AlphabetChannels = array(  
-    "A" => 242, //CID
-    "B" => 243,
-	"C" => 244, 
-    "D" => 245,
-    "E" => 246,
-    "F" => 247,
-    "G" => 248,
-    "H" => 249,
-    "I" => 250,
-    "J" => 251,
-    "K" => 252,
-    "L" => 253,
-    "M" => 254,
-    "N" => 255,
-    "O" => 256,
-    "P" => 257,
-    "Q" => 258,
-    "R" => 259,
-    "S" => 260,
-    "T" => 261,
-    "U" => 262,
-    "V" => 263,
-    "W" => 264,
-    "X" => 265,
-    "Y" => 266,
-    "Z" => 267,
-    "Other" => 307,
-    
-);
-try {
-    
-    while (1) {
-        
-        connection();
-        foreach ($ts3_VirtualServer->channelList() as $AllChannels) 
-		{
-            if($AllChannels["channel_name"] == "Lobby" || $AllChannels["channel_name"] == "General Gaming Channels"  || $AllChannels["channel_name"] == "Default Channel" || $AllChannels["channel_name"] == "[cspacer1] ----User Created Channels----" || $AllChannels["channel_name"] == "[cspacer0] ---Fixed General Channels---"  )
+    // register a callback for notifyTextmessage events
+    TeamSpeak3_Helper_Signal::getInstance()->subscribe("notifyTextmessage", function (TeamSpeak3_Adapter_ServerQuery_Event $event, TeamSpeak3_Node_Host $host)
+    {
+        echo "Client " . $event["invokername"] . " sent textmessage: " . $event["msg"];
+    });
+
+    // wait for events
+    while (1)
+    {
+        $ts3_VirtualServer->login($config['serveradmin'], $config['password']);
+
+        foreach ($ts3_VirtualServer->channelList() as $channel)
+        {
+            if (in_array($channel["channel_name"], $defaultChannels) || //
+                in_array($channel["cid"], $alphabetChannels) || //
+                in_array($channel["cid"], $protectedChannelUIDs) || //
+                $channel["pid"] != 0
+            )
+            {
                 continue;
-                
-            if(in_array($channelList["cid"], $AlphabetChannels))
-                continue;
+            }
 
-            if($AllChannels["pid"] != 0 )
-                continue;
+            $channelName    = preg_replace('/\[PERMANENT\]/', "", $channel['channel_name']);
+            $foundChannel   = FALSE;
+            $channelRenamed = FALSE;
 
-			if(in_array($AllChannels["cid"] , $dont_touch))
-				continue;
-			
-			if(in_array($AllChannels["cid"], $AlphabetChannels))
-				continue;
-		
-			$ChannelName = preg_replace('/\[PERMANENT\]/', "", $AllChannels['channel_name']);
-			$foundChannel = false;
-			$channelRenamed = false;
-			foreach ($AlphabetChannels as $ParentChannel => $cid) {
-				$subChannels = $ts3_VirtualServer->channelGetById($cid)->subChannelList();
-				if(!empty($subChannels))
-					$lastId = end($subChannels)->getId();
-				else
-					$lastId = null;
-				
-				if (preg_match('/^\s/', $ChannelName)) 
-				   $ChannelName = preg_replace('/^\s/', "", $ChannelName);
-			   
-			   
-				foreach ($subChannels as $subChannel) {
-					if(strpos($ChannelName, '[DUPLICATENAME_TO_BE_DELETED]') !== false)
-					{
-						$ts3_VirtualServer->channelDelete($AllChannels["cid"], true);
-						continue 3;
-					}
-					if ($ChannelName == $subChannel['channel_name']) {
-						try
-						{
-							$AllChannels->modify(array(
-								"channel_name" => substr($ChannelName,0,11) . '[DUPLICATENAME_TO_BE_DELETED]',
-								"channel_description" =>  $ChannelName . ' channel name is already used. Rename this channel as something different'            
-							));
-						}
-						catch(TeamSpeak3_Exception $e) 
-						{
-							try
-							{
-								print_r("DELETE");
-								print_r($e->getMessage());
-								$ts3_VirtualServer->channelDelete($AllChannels["cid"]);
-							}
-							catch(TeamSpeak3_Exception $e){}
-						}
-					}
-				}
-				
-				try
-				{
-					
-					if ($ChannelName[0] === $ParentChannel || $ChannelName[0] === strtolower($ParentChannel) || ($ParentChannel === "Other" && !$foundChannel ) ) {
-						$foundChannel = true;
+            foreach ($alphabetChannels as $parentChannel => $cid)
+            {
+                $subChannels = $ts3_VirtualServer->channelGetById($cid)->subChannelList();
 
-						$ts3_VirtualServer->channelMove($AllChannels['cid'], $cid , $lastId);
-					}
+                if (! empty($subChannels))
+                {
+                    $lastId = end($subChannels)->getId();
+                }
+                else
+                {
+                    $lastId = NULL;
+                }
 
-					if (preg_match('/[^A-Za-z]/', $ParentChannel)) {
-						if (!ctype_alpha($ChannelName[0])) {
-							$ts3_VirtualServer->channelMove($AllChannels['cid'], $cid , $lastId);
-						}
-					}
-				}
-				catch(TeamSpeak3_Exception $e) {
-					try{
-						$ts3_VirtualServer->channelDelete($AllChannels["cid"]);
-					}
-					catch(TeamSpeak3_Exception $e){}
-				}			
-			} 
-        } 
-        
+                if (preg_match('/^\s/', $channelName))
+                {
+                    $channelName = preg_replace('/^\s/', "", $channelName);
+                }
+
+                foreach ($subChannels as $subChannel)
+                {
+                    if (strpos($channelName, '[DUPLICATENAME_TO_BE_DELETED]') !== FALSE)
+                    {
+                        $ts3_VirtualServer->channelDelete($channel["cid"], TRUE);
+                        continue 3;
+                    }
+
+                    if ($channelName == $subChannel['channel_name'])
+                    {
+                        try
+                        {
+                            $channel->modify([
+                                "channel_name"        => substr($channelName, 0, 11) . '[DUPLICATENAME_TO_BE_DELETED]',
+                                "channel_description" => $channelName . ' channel name is already used. Rename this channel as something different',
+                            ]);
+                        }
+                        catch (TeamSpeak3_Exception $e)
+                        {
+                            try
+                            {
+                                print_r("DELETE");
+                                print_r($e->getMessage());
+                                $ts3_VirtualServer->channelDelete($channel["cid"]);
+                            }
+                            catch (TeamSpeak3_Exception $e)
+                            {
+                            }
+                        }
+                    }
+                }
+
+                try
+                {
+                    if ($channelName[0] === $parentChannel || $channelName[0] === strtolower($parentChannel) || ($parentChannel === "Other" && ! $foundChannel))
+                    {
+                        $foundChannel = TRUE;
+
+                        $ts3_VirtualServer->channelMove($channel['cid'], $cid, $lastId);
+                    }
+
+                    if (preg_match('/[^A-Za-z]/', $parentChannel))
+                    {
+                        if (! ctype_alpha($channelName[0]))
+                        {
+                            $ts3_VirtualServer->channelMove($channel['cid'], $cid, $lastId);
+                        }
+                    }
+                }
+                catch (TeamSpeak3_Exception $e)
+                {
+                    try
+                    {
+                        $ts3_VirtualServer->channelDelete($channel["cid"]);
+                    }
+                    catch (TeamSpeak3_Exception $e)
+                    {
+                    }
+                }
+            }
+        }
+
+        $ts3_VirtualServer->channelListReset();
+
         $ts3_VirtualServer->logout();
-        sleep(5);
-        
+        sleep(1);
     }
-} 
-catch(TeamSpeak3_Exception $e) {
+}
+catch (TeamSpeak3_Exception $e)
+{
     echo "Error " . $e->getCode() . ": " . $e->getMessage();
 }
 
-
-?>
