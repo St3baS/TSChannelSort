@@ -1,0 +1,5 @@
+.idea
+ts3phpframework
+
+configs/*
+!configs/exampleConfig.php
