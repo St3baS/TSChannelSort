@@ -15,20 +15,8 @@ try
                          "/?server_port={$config['port']}&nickname={$config['nickname']}&blocking=0";
     $ts3_VirtualServer = TeamSpeak3::factory($server_uri);
 
-    // get notified on incoming private messages
-    $ts3_VirtualServer->notifyRegister("textprivate");
-
-    // register a callback for notifyTextmessage events
-    TeamSpeak3_Helper_Signal::getInstance()->subscribe("notifyTextmessage", function (TeamSpeak3_Adapter_ServerQuery_Event $event, TeamSpeak3_Node_Host $host)
-    {
-        echo "Client " . $event["invokername"] . " sent textmessage: " . $event["msg"];
-    });
-
-    // wait for events
     while (1)
     {
-        $ts3_VirtualServer->login($config['serveradmin'], $config['password']);
-
         foreach ($ts3_VirtualServer->channelList() as $channel)
         {
             if (in_array($channel["channel_name"], $defaultChannels) || //
@@ -125,8 +113,6 @@ try
         }
 
         $ts3_VirtualServer->channelListReset();
-
-        $ts3_VirtualServer->logout();
         sleep(1);
     }
 }
